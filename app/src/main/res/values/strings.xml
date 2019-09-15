@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Scenic Hiking</string>
+
+    <string name="mapbox_access_token">pk.eyJ1IjoiZ291dGhhbTIwMTkiLCJhIjoiY2swaWl1cWVuMDA0dzNjbXY1YTBvMTVkcyJ9.EBrzrmvTmjXmHsyTrAqyrA</string>
+    <string name="loc_permission_not_granted">Location permission is required for Routing while you Hike</string>
+    <string name="loc_permission_explanation">Custom Routes can be tracked and saved only with Location permission</string>
+
+</resources>
