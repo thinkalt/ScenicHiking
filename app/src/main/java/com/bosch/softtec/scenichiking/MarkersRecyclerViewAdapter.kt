@@ -17,7 +17,6 @@ import kotlinx.android.synthetic.main.item_marker.view.*
 *
 * */
 class MarkersRecyclerViewAdapter(
-    val context: Context,
     val markers: ArrayList<MyMarker>,
     val listener: MarkerClickListener
 ) :
@@ -31,7 +30,7 @@ class MarkersRecyclerViewAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = markers.get(position)
-        holder.name.text = "Marker ${position}"
+        holder.name.text = "Marker ${position + 1}"
 
         // displaying lat long only upto 4 decimal points for better look and feel
         holder.latitude.text = "Latitude: ${String.format("%.4f", item.point.latitude)}"

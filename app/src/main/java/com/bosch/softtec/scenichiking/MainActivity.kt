@@ -235,7 +235,7 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
     * */
     fun updateReceyclerView() {
         if (mViewModel.markers.value != null && mViewModel.markers.value!!.size > 0) {
-            val adapter = MarkersRecyclerViewAdapter(this, mViewModel.markers.value!!, this)
+            val adapter = MarkersRecyclerViewAdapter(mViewModel.markers.value!!, this)
 
             //when list is already shown, just update the list instead of recreating the dialog.
             if (mCustomDialog != null) {
