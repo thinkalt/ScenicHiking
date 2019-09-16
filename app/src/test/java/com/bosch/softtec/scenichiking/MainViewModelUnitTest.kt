@@ -8,11 +8,11 @@ import org.junit.Assert.*
 import org.junit.Rule
 
 /**
- * Example local unit test, which will execute on the development machine (host).
+ * MainViewModelUnitTest local unit test, which will execute on the development machine (host).
  *
  * See [testing documentation](http://d.android.com/tools/testing).
  */
-class ExampleUnitTest {
+class MainViewModelUnitTest {
 
 
     @Rule
@@ -21,11 +21,12 @@ class ExampleUnitTest {
 
     private val viewModel by lazy { MainViewModel() }
 
-    /*private fun setValues(value: String) {
-        viewModel.symbolLayerIconFeatureList.value = value
-        viewModel.right.value = value
-    }*/
 
+    /*
+    *
+    * Tests if LatLng objects are getting added to symbolLayerIconFeatureList
+    *
+    * */
     @Test
     fun updateSymbolLayer() {
         // given
@@ -42,6 +43,12 @@ class ExampleUnitTest {
         assertEquals(3, viewModel.symbolLayerIconFeatureList.value!!.size)
     }
 
+
+    /*
+    *
+    * Tests if Duplicate LatLng objects are getting added to symbolLayerIconFeatureList
+    *
+    * */
     @Test
     fun updateSymbolLayer_filterDuplicateMarkerLocation() {
         // given
@@ -55,6 +62,13 @@ class ExampleUnitTest {
         assertEquals(1, viewModel.symbolLayerIconFeatureList.value!!.size)
     }
 
+
+    /*
+    *
+    * Tests if LatLng objects are getting added to routeCoordinates & then further into
+    * featureArray object.
+    *
+    * */
     @Test
     fun updateRouteCoordinates() {
         // given
@@ -69,6 +83,7 @@ class ExampleUnitTest {
 
         // then
         assertEquals(3, viewModel.routeCoordinates.value!!.size)
+        assertEquals(3, viewModel.featureArray.value!!.size)
     }
 
 }

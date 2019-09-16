@@ -1,9 +1,11 @@
 package com.bosch.softtec.scenichiking
 
-import android.animation.ValueAnimator
 import android.graphics.BitmapFactory
+import android.location.Location
 import android.os.Bundle
 import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -15,6 +17,8 @@ import com.mapbox.android.core.permissions.PermissionsListener
 import com.mapbox.android.core.permissions.PermissionsManager
 import com.mapbox.geojson.Feature
 import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.Point
+import com.mapbox.mapboxsdk.camera.CameraPosition
 import com.mapbox.mapboxsdk.camera.CameraUpdateFactory
 import com.mapbox.mapboxsdk.geometry.LatLng
 import com.mapbox.mapboxsdk.geometry.LatLngBounds
@@ -33,11 +37,23 @@ import com.mapbox.mapboxsdk.style.layers.SymbolLayer
 import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
 import kotlinx.android.synthetic.main.activity_main.*
 
+/*
+*
+* Created By Goutham Iyyappan on 14/Sep/2019 for Bosch SoftTec.
+*
+* MainActivity class that represents all the UI related the Scenic Hiking App.
+* 1. Displays Map
+* 2. Displays User position and Bearing
+* 3. Has ability to add a Marker on the Map
+* 4. Displays all markers in a list using a recyclerview
+* 5. Adds ability to Toggle between Favorite marker locations from the list.
+*
+* */
 class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallback,
     MapboxMap.OnMapLongClickListener,
-    MapboxMap.OnMapClickListener {
+    MapboxMap.OnMapClickListener, MarkerClickListener, LocationListeningCallback.LocationReceived {
 
-    companion object {
+    companion object { //Static references
 
         private val SOURCE_ID = "destination-source-id"
         private val SELECTED_SOURCE_ID = "selected-source-id"
@@ -47,14 +63,14 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
         private val SELECTED_ICON_ID = "selected-icon-id"
     }
 
-    private var mMapboxMap: MapboxMap? = null
-    private var locationComponent: LocationComponent? = null
-    private var locationEngine: LocationEngine? = null
+    var mMapboxMap: MapboxMap? = null
+    private var mLocationComponent: LocationComponent? = null
+    private var mLocationEngine: LocationEngine? = null
+    private var mCustomDialog: CustomListViewDialog? = null
 
-    private lateinit var permissionsManager: PermissionsManager
-    private lateinit var viewModel: MainViewModel
-    private lateinit var callback: LocationListeningCallback
-//    private var source: GeoJsonSource? = null
+    private lateinit var mPermissionsManager: PermissionsManager
+    private lateinit var mViewModel: MainViewModel
+    private lateinit var mLocationcallback: LocationListeningCallback
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
@@ -81,14 +97,14 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
         mapView.onResume()
 
         if (!PermissionsManager.areLocationPermissionsGranted(this)) {
-            permissionsManager = PermissionsManager(this)
-            permissionsManager.requestLocationPermissions(this)
+            mPermissionsManager = PermissionsManager(this)
+            mPermissionsManager.requestLocationPermissions(this)
         }
     }
 
     override fun onStop() {
         super.onStop()
-        locationEngine?.removeLocationUpdates(callback)
+        mLocationEngine?.removeLocationUpdates(mLocationcallback)
         mapView.onStop()
     }
 
@@ -97,25 +113,81 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
         mapView.onDestroy()
     }
 
+    override fun onLocationReceived(location: Location) {
+        val position = CameraPosition.Builder()
+            .target(LatLng(location.latitude, location.longitude))
+            .zoom(25.0)
+            .tilt(20.0)
+            .build()
 
+        if (mMapboxMap != null)
+            mMapboxMap!!.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    position
+                ), 7000
+            )
+    }
+
+    /*
+        *
+        * Method acts as entry point to UI elements, setting up databinding and initializing mapviews,
+        * location callback and permission manager.
+        *
+        * */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        viewModel = ViewModelProviders.of(this).get(MainViewModel::class.java)
+        mViewModel = ViewModelProviders.of(this).get(MainViewModel::class.java)
 
         DataBindingUtil.setContentView<ActivityMainBinding>(this, R.layout.activity_main).let {
             it.setLifecycleOwner(this)
-            it.viewModel = viewModel
+            it.viewModel = mViewModel
         }
 
-        callback = LocationListeningCallback(this)
-        permissionsManager = PermissionsManager(this)
+        mPermissionsManager = PermissionsManager(this)
 
         mapView.onCreate(savedInstanceState)
         mapView.getMapAsync(this)
+        mLocationcallback = LocationListeningCallback(this, this)
+
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu, menu)
+        return true
+    }
+
+    /*
+    *
+    * Hides showlist option item until any markers are added
+    * */
+    override fun onPrepareOptionsMenu(menu: Menu?): Boolean {
+        menu!!.setGroupVisible(
+            R.id.group,
+            (mViewModel.markers.value != null && mViewModel.markers.value!!.size > 0)
+        )
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_settings -> {
+                updateReceyclerView()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    /*
+    *
+    * Called when the map is ready to be used.
+    *
+    * @param mapboxMap An instance of MapboxMap.
+    *
+    * */
     override fun onMapReady(mapboxMap: MapboxMap) {
         this.mMapboxMap = mapboxMap
         mMapboxMap!!.setStyle(Style.OUTDOORS) { style ->
@@ -133,33 +205,82 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
     /*
     *
     * Markers and Polylines get added here based on user long click action
+    *
+    * @param point An instance of LatLng.
+    *
     * */
     override fun onMapLongClick(point: LatLng): Boolean {
+
         /*
        * Add Markers
        * */
-        viewModel.updateSymbolLayer(point)
-        viewModel.updateListOfLatLong(point)
+        mViewModel.updateSymbolLayer(point)
+        mViewModel.updateListOfLatLong(point)
 
         val source = mMapboxMap!!.style!!.getSourceAs<GeoJsonSource>(SOURCE_ID)
         if (source != null)
-            source!!.setGeoJson(FeatureCollection.fromFeatures(viewModel.symbolLayerIconFeatureList.value!!))
+            source.setGeoJson(FeatureCollection.fromFeatures(mViewModel.symbolLayerIconFeatureList.value!!))
 
-        val selectedsource = mMapboxMap!!.style!!.getSourceAs<GeoJsonSource>(SELECTED_SOURCE_ID)
-        /*if (selectedsource != null)
-            selectedsource!!.setGeoJson(FeatureCollection.fromFeatures(viewModel.symbolLayerIconFeatureList.value!!))*/
+        addStraightPolylines(point)
+        mViewModel.addMarker(SYMBOL_LAYER_ID, SOURCE_ID, point, false)
 
-        /*
-        * Add Straight Polyline between Markers
-        * */
-        viewModel.updateRouteCoordinates(point) //Adds co-ordinates for lines
+        invalidateOptionsMenu()
+        return true
+    }
+
+    /*
+    *
+    * Displays a custom Dialog with a list of markers added by user.
+    *
+    * */
+    fun updateReceyclerView() {
+        if (mViewModel.markers.value != null && mViewModel.markers.value!!.size > 0) {
+            val adapter = MarkersRecyclerViewAdapter(this, mViewModel.markers.value!!, this)
+
+            //when list is already shown, just update the list instead of recreating the dialog.
+            if (mCustomDialog != null) {
+                mCustomDialog!!.notifyDatasetChanges(adapter)
+            } else {
+                mCustomDialog = CustomListViewDialog(this, adapter)
+            }
+
+            mCustomDialog!!.show()
+            mCustomDialog!!.setCanceledOnTouchOutside(true)
+        }
+    }
+
+    /*
+    *
+    * onclick method handling to toggle marker as favorite or not.
+    *
+    * */
+    override fun onSelectMarker(marker: MyMarker) {
+        if (marker.isFavorite) {
+            addFavoriteMarkerOnMap(marker.point)
+        } else {
+            removeFavMarkerOnMap(marker)
+        }
+
+        mViewModel.updateMarker(marker.layerId, marker.sourceId, marker.point, marker.isFavorite)
+        updateReceyclerView()
+    }
+
+
+    /*
+   *
+   * Adds a Straight Polyline between Markers in the order of creation.
+   *
+   * */
+    fun addStraightPolylines(point: LatLng) {
+
+        mViewModel.updateRouteCoordinates(point) //Adds co-ordinates for lines
 
         val lineSource = "line-source-${System.currentTimeMillis()}"
         val lineLayer = "linelayer${System.currentTimeMillis()}"
         mMapboxMap!!.style!!.addSource(
             GeoJsonSource(
                 lineSource,
-                FeatureCollection.fromFeatures(viewModel.featureArray.value!!)
+                FeatureCollection.fromFeatures(mViewModel.featureArray.value!!)
             )
         )
 
@@ -171,88 +292,24 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
                 lineColor(ContextCompat.getColor(this, R.color.colorPrimaryDark))
             )
         )
-        return true
     }
 
+    /*
+    *
+    * method to handle user click action on the map.
+    * zooms out/in to display all markers created by user.
+    *
+    * */
     override fun onMapClick(point: LatLng): Boolean {
-
-        val screenPoint = mMapboxMap!!.getProjection().toScreenLocation(point)
-
-        val features =
-            mMapboxMap!!.queryRenderedFeatures(screenPoint, SYMBOL_LAYER_ID)
-
-        val selectedFeature =
-            mMapboxMap!!.queryRenderedFeatures(screenPoint, SELECTED_SYMBOL_LAYER_ID)
-
-        var selectedMarkerSymbolLayer =
-            mMapboxMap!!.style!!.getLayer(SELECTED_SYMBOL_LAYER_ID) as? SymbolLayer
-
-        if (features.isEmpty()) {
-            return false
-        }
-
-        if (selectedFeature.size > 0 && selectedMarkerSymbolLayer != null) {
-            mMapboxMap!!.style!!.removeLayer(selectedMarkerSymbolLayer)
-            mMapboxMap!!.style!!.removeSource(mMapboxMap!!.style!!.getSource(SELECTED_SOURCE_ID)!!)
-            return true
-        }
-
-        if (selectedMarkerSymbolLayer == null) {
-            addSelectedSourceLayer(mMapboxMap!!.style!!)
-            selectedMarkerSymbolLayer =
-                mMapboxMap!!.style!!.getLayer(SELECTED_SYMBOL_LAYER_ID) as? SymbolLayer
-        }
-
-        mMapboxMap!!.style!!.getSourceAs<GeoJsonSource>(SELECTED_SOURCE_ID)?.setGeoJson(
-            FeatureCollection.fromFeatures(
-                arrayOf(Feature.fromGeometry(features.get(0).geometry()))
-            )
-        )
-
-        if (features.size > 0 && selectedMarkerSymbolLayer != null) {
-            features.get(0).addBooleanProperty("selected", true)
-            selectedMarkerSymbolLayer.setProperties(
-                iconImage(SELECTED_ICON_ID)
-            )
-        }
-
+        zoomOutCameraToShowAllMarkers()
         return true
-    }
-
-    var markerSelected = false
-    lateinit var markerAnimator: ValueAnimator
-
-    fun selectMarker(iconLayer: SymbolLayer) {
-        markerAnimator = ValueAnimator()
-        markerAnimator.setObjectValues(1f, 2f)
-        markerAnimator.setDuration(300)
-        markerAnimator.addUpdateListener {
-            iconLayer.setProperties(
-                iconImage(SELECTED_ICON_ID),
-                iconSize((it.getAnimatedValue()).toString().toFloat())
-            )
-        }
-        markerAnimator.start()
-        markerSelected = true
-    }
-
-    fun deselectMarker(iconLayer: SymbolLayer) {
-        markerAnimator.setObjectValues(2f, 1f)
-        markerAnimator.setDuration(300)
-        markerAnimator.addUpdateListener {
-            iconLayer.setProperties(
-                iconSize((it.getAnimatedValue()).toString().toFloat())
-            )
-        }
-        markerAnimator.start()
-        markerSelected = false
     }
 
     fun zoomOutCameraToShowAllMarkers(): Boolean {
-        viewModel.initListOfLatLong()
-        if (viewModel.listOfLatLng.value!!.size > 1) {
+        mViewModel.initListOfLatLong()
+        if (mViewModel.listOfLatLng.value!!.size > 1) {
             var latLngBounds =
-                LatLngBounds.Builder().includes(viewModel.listOfLatLng.value!!).build()
+                LatLngBounds.Builder().includes(mViewModel.listOfLatLng.value!!).build()
 
             mMapboxMap!!.moveCamera(CameraUpdateFactory.newLatLngBounds(latLngBounds, 100))
 
@@ -262,10 +319,10 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
     }
 
     /*
-      *
-      * Prepares the Markers to be ready to be added in the map.
-      *
-      * */
+    *
+    * Prepares the Markers to be ready to be added in the map.
+    *
+    * */
     fun addSymbolLayers(loadedMapStyle: Style) {
 
         loadedMapStyle.addImage(
@@ -292,14 +349,26 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
         )
 
         loadedMapStyle.addLayer(destinationSymbolLayer)
-        addSelectedSourceLayer(loadedMapStyle)
     }
 
-    fun addSelectedSourceLayer(loadedMapStyle: Style) {
-        val selectedSource = GeoJsonSource(SELECTED_SOURCE_ID)
-        loadedMapStyle.addSource(selectedSource)
+    /*
+    *
+    * Adds favorite icons on Marker locations in the map.
+    *
+    * */
+    fun addFavoriteMarkerOnMap(point: LatLng) {
+        val uniqueSourceId = SELECTED_SOURCE_ID + System.currentTimeMillis()
+        val uniqueLayerId = SELECTED_SYMBOL_LAYER_ID + System.currentTimeMillis()
 
-        val selectedSymbolLayer = SymbolLayer(SELECTED_SYMBOL_LAYER_ID, SELECTED_SOURCE_ID)
+        val feature = Feature.fromGeometry(
+            Point.fromLngLat(point.getLongitude(), point.getLatitude())
+        )
+        mViewModel.createFavoriteMarker(uniqueSourceId, uniqueLayerId, point, true)
+
+        val selectedSource = GeoJsonSource(uniqueSourceId, FeatureCollection.fromFeature(feature))
+        mMapboxMap!!.style!!.addSource(selectedSource)
+
+        val selectedSymbolLayer = SymbolLayer(uniqueLayerId, uniqueSourceId)
 
         selectedSymbolLayer.withProperties(
             iconImage(SELECTED_ICON_ID),
@@ -307,8 +376,26 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
             iconIgnorePlacement(true),
             iconOffset(arrayOf(0f, -9f))
         )
+        mMapboxMap!!.style!!.addLayer(selectedSymbolLayer)
+    }
 
-        loadedMapStyle.addLayer(selectedSymbolLayer)
+    /*
+    *
+    * Removes favorite icons from Marker locations in the map.
+    *
+    * */
+    fun removeFavMarkerOnMap(marker: MyMarker) {
+        val favMarker = mViewModel.removeFavoriteMarker(marker)
+        if (favMarker != null) {
+            val selectedMarkerSymbolLayer =
+                mMapboxMap!!.style!!.getLayer(favMarker.layerId) as? SymbolLayer
+            val source = mMapboxMap!!.style!!.getSource(favMarker.sourceId)
+
+            if (selectedMarkerSymbolLayer != null && source != null) {
+                mMapboxMap!!.style!!.removeLayer(selectedMarkerSymbolLayer)
+                mMapboxMap!!.style!!.removeSource(source)
+            }
+        }
     }
 
     /*
@@ -330,23 +417,23 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
                 .build()
 
 
-            locationComponent = mMapboxMap?.locationComponent
+            mLocationComponent = mMapboxMap?.locationComponent
 
             // Activate with a built LocationComponentActivationOptions object
-            locationComponent?.activateLocationComponent(locationComponentActivationOptions)
+            mLocationComponent?.activateLocationComponent(locationComponentActivationOptions)
 
             // Enable to make component visible
-            locationComponent?.isLocationComponentEnabled = true
+            mLocationComponent?.isLocationComponentEnabled = true
 
             // Set the component's camera mode
-            locationComponent?.cameraMode = CameraMode.TRACKING
+            mLocationComponent?.cameraMode = CameraMode.TRACKING
 
             // Set the component's render mode
-            locationComponent?.renderMode = RenderMode.COMPASS
+            mLocationComponent?.renderMode = RenderMode.COMPASS
 
         } else {
-            permissionsManager = PermissionsManager(this)
-            permissionsManager.requestLocationPermissions(this)
+            mPermissionsManager = PermissionsManager(this)
+            mPermissionsManager.requestLocationPermissions(this)
         }
     }
 
@@ -360,7 +447,7 @@ class MainActivity : AppCompatActivity(), PermissionsListener, OnMapReadyCallbac
         requestCode: Int, permissions: Array<String>,
         grantResults: IntArray
     ) {
-        permissionsManager.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        mPermissionsManager.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
     override fun onExplanationNeeded(permissionsToExplain: MutableList<String>?) {
